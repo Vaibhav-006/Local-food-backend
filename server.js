@@ -1,3 +1,6 @@
+import cors from "cors";
+import express from "express";
+
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -7,7 +10,10 @@ require('dotenv').config({ path: './config.env' });
 const app = express();
 
 // Middleware
-app.use(cors());
+app.use(cors({
+    origin: "https://local-food-discovery.vercel.app",
+    credentials: true
+}));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../')));
 app.use('/uploads', express.static(path.join(__dirname, './uploads')));
