@@ -112,24 +112,28 @@ app.post('/api/simple-login', async (req, res) => {
 });
 
 // Serve frontend files
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, '../index.html'));
-});
+// app.get('/', (req, res) => {
+//     res.sendFile(path.join(__dirname, '../index.html'));
+// });
 
-app.get('/login', (req, res) => {
-    res.sendFile(path.join(__dirname, '../login.html'));
-});
+// app.get('/login', (req, res) => {
+//     res.sendFile(path.join(__dirname, '../login.html'));
+// });
 
-app.get('/register', (req, res) => {
-    res.sendFile(path.join(__dirname, '../register.html'));
-});
+// app.get('/register', (req, res) => {
+//     res.sendFile(path.join(__dirname, '../register.html'));
+// });
 
-app.get('/dashboard', (req, res) => {
-    res.sendFile(path.join(__dirname, '../dashboard.html'));
-});
+// app.get('/dashboard', (req, res) => {
+//     res.sendFile(path.join(__dirname, '../dashboard.html'));
+// });
 
-app.get('/search', (req, res) => {
-    res.sendFile(path.join(__dirname, '../search.html'));
+// app.get('/search', (req, res) => {
+//     res.sendFile(path.join(__dirname, '../search.html'));
+// });
+
+app.get("/", (req, res) => {
+  res.send("API is working!");
 });
 
 // Error handling middleware
