@@ -1,6 +1,3 @@
-import cors from "cors";
-import express from "express";
-
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -10,13 +7,17 @@ require('dotenv').config({ path: './config.env' });
 const app = express();
 
 // Middleware
-app.use(cors({
-    origin: "https://local-food-discovery.vercel.app",
-    credentials: true
-}));
+app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../')));
-app.use('/uploads', express.static(path.join(__dirname, './uploads')));
+// Keep uploads directory for backward compatibility with old images
+const uploadsPath = path.join(__dirname, './uploads');
+if (require('fs').existsSync(uploadsPath)) {
+    app.use('/uploads', express.static(uploadsPath));
+    console.log('✅ Uploads directory enabled for backward compatibility');
+} else {
+    console.warn('⚠️  Uploads directory not found - old local images will not load');
+}
 
 // MongoDB Atlas Connection
 const connectDB = async () => {
@@ -39,11 +40,13 @@ connectDB();
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
 const foodRoutes = require('./routes/foods');
+const aiRoutes = require('./routes/ai');
 
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/foods', foodRoutes);
+app.use('/api/ai', aiRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -118,28 +121,28 @@ app.post('/api/simple-login', async (req, res) => {
 });
 
 // Serve frontend files
-// app.get('/', (req, res) => {
-//     res.sendFile(path.join(__dirname, '../index.html'));
-// });
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, '../index.html'));
+});
 
-// app.get('/login', (req, res) => {
-//     res.sendFile(path.join(__dirname, '../login.html'));
-// });
+app.get('/login', (req, res) => {
+    res.sendFile(path.join(__dirname, '../login.html'));
+});
 
-// app.get('/register', (req, res) => {
-//     res.sendFile(path.join(__dirname, '../register.html'));
-// });
+app.get('/register', (req, res) => {
+    res.sendFile(path.join(__dirname, '../register.html'));
+});
 
-// app.get('/dashboard', (req, res) => {
-//     res.sendFile(path.join(__dirname, '../dashboard.html'));
-// });
+app.get('/dashboard', (req, res) => {
+    res.sendFile(path.join(__dirname, '../dashboard.html'));
+});
 
-// app.get('/search', (req, res) => {
-//     res.sendFile(path.join(__dirname, '../search.html'));
-// });
+app.get('/search', (req, res) => {
+    res.sendFile(path.join(__dirname, '../search.html'));
+});
 
-app.get("/", (req, res) => {
-  res.send("API is working!");
+app.get('/ai-recommendations', (req, res) => {
+    res.sendFile(path.join(__dirname, '../ai-recommendations.html'));
 });
 
 // Error handling middleware
