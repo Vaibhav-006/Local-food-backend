@@ -43,7 +43,23 @@ connectDB();
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
 const foodRoutes = require('./routes/foods');
-const aiRoutes = require('./routes/ai');
+
+// Import AI routes with error handling
+let aiRoutes;
+try {
+    aiRoutes = require('./routes/ai');
+    console.log('✅ AI routes loaded successfully');
+} catch (error) {
+    console.error('❌ Error loading AI routes:', error);
+    // Create a dummy router to prevent server crash
+    aiRoutes = require('express').Router();
+    aiRoutes.post('/recommendations', (req, res) => {
+        res.status(500).json({ 
+            success: false, 
+            message: 'AI routes failed to load. Please check server logs.' 
+        });
+    });
+}
 
 // Routes
 app.use('/api/auth', authRoutes);
@@ -159,9 +175,20 @@ app.use((err, req, res, next) => {
     res.status(500).json({ message: 'Something went wrong!' });
 });
 
-// 404 handler
+// 404 handler - must be last
 app.use('*', (req, res) => {
-    res.status(404).json({ message: 'Route not found' });
+    console.log(`❌ 404 - Route not found: ${req.method} ${req.originalUrl}`);
+    res.status(404).json({ 
+        success: false,
+        message: `Route not found: ${req.method} ${req.originalUrl}`,
+        availableRoutes: [
+            'GET /api/health',
+            'GET /api/test',
+            'POST /api/auth/register',
+            'POST /api/auth/login',
+            'POST /api/ai/recommendations'
+        ]
+    });
 });
 
 const PORT = process.env.PORT || 5000;
