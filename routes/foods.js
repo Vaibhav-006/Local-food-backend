@@ -1,29 +1,52 @@
 const express = require('express');
-const path = require('path');
-const fs = require('fs');
 const multer = require('multer');
+const cloudinary = require('cloudinary').v2;
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const jwt = require('jsonwebtoken');
 const Food = require('../models/Food');
 const User = require('../models/User');
 
 const router = express.Router();
 
-// Ensure uploads directory exists
-const uploadsDir = path.join(__dirname, '..', 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir, { recursive: true });
-    console.log('Created uploads directory:', uploadsDir);
+// Configure Cloudinary for production
+if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+    console.error('❌ Cloudinary credentials not configured!');
+    console.error('Image uploads will fail. Please add the following to config.env:');
+    console.error('  CLOUDINARY_CLOUD_NAME=your_cloud_name');
+    console.error('  CLOUDINARY_API_KEY=your_api_key');
+    console.error('  CLOUDINARY_API_SECRET=your_api_secret');
+} else {
+    cloudinary.config({
+        cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+        api_key: process.env.CLOUDINARY_API_KEY,
+        api_secret: process.env.CLOUDINARY_API_SECRET,
+        secure: true // Force HTTPS for production
+    });
+    console.log('✅ Cloudinary configured successfully');
+    console.log(`   Cloud Name: ${process.env.CLOUDINARY_CLOUD_NAME}`);
+    console.log(`   API Key: ${process.env.CLOUDINARY_API_KEY.substring(0, 8)}...`);
 }
 
-// Multer storage
-const storage = multer.diskStorage({
-    destination: function(req, file, cb) {
-        cb(null, uploadsDir);
-    },
-    filename: function(req, file, cb) {
-        const ext = path.extname(file.originalname);
-        const base = path.basename(file.originalname, ext).replace(/[^a-z0-9_-]/gi, '_');
-        cb(null, `${Date.now()}_${base}${ext}`);
+// Cloudinary storage configuration for production
+const storage = new CloudinaryStorage({
+    cloudinary: cloudinary,
+    params: async (req, file) => {
+        // Generate unique filename for Cloudinary
+        const timestamp = Date.now();
+        const sanitizedName = file.originalname
+            .replace(/[^a-z0-9._-]/gi, '_')
+            .replace(/\.[^/.]+$/, ''); // Remove extension
+        
+        return {
+            folder: 'fooddiscover', // Folder name in Cloudinary
+            allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
+            transformation: [{ width: 1000, height: 1000, crop: 'limit', quality: 'auto' }], // Optimize images
+            resource_type: 'image',
+            public_id: `${timestamp}_${sanitizedName}`,
+            use_filename: false, // Don't use original filename
+            unique_filename: true, // Ensure unique filenames
+            overwrite: false // Don't overwrite existing files
+        };
     }
 });
 
@@ -36,7 +59,7 @@ const fileFilter = (req, file, cb) => {
 const upload = multer({
     storage,
     fileFilter,
-    limits: { fileSize: 5 * 1024 * 1024 }
+    limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
 });
 
 // Multer error handling middleware
@@ -139,12 +162,89 @@ router.post('/', auth, (req, res, next) => {
             }
         }
 
+        // Check Cloudinary configuration
+        if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+            return res.status(500).json({ 
+                success: false, 
+                message: 'Cloudinary is not configured. Please contact administrator.' 
+            });
+        }
+
         let normalizedTags = Array.isArray(tags)
             ? tags
             : (typeof tags === 'string' && tags.length ? tags.split(',').map(t => t.trim()) : []);
         normalizedTags = normalizedTags.filter(Boolean).slice(0, 10);
 
-        const images = req.files.map(f => `/uploads/${f.filename}`);
+        // Extract Cloudinary URLs from uploaded files
+        // multer-storage-cloudinary returns the Cloudinary response in file.path (secure_url)
+        const images = req.files.map((file, index) => {
+            try {
+                // multer-storage-cloudinary stores the secure_url in file.path
+                // This is the HTTPS URL that works in production
+                if (file.path && (file.path.startsWith('http://') || file.path.startsWith('https://'))) {
+                    console.log(`Image ${index + 1} uploaded to Cloudinary:`, file.path);
+                    return file.path;
+                }
+                
+                // If path exists but doesn't start with http, it might be a public_id
+                // Construct the full Cloudinary URL
+                if (file.path) {
+                    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+                    // Check if it's already a public_id (no http/https)
+                    if (!file.path.startsWith('http')) {
+                        const url = `https://res.cloudinary.com/${cloudName}/image/upload/fooddiscover/${file.path}`;
+                        console.log(`Constructed Cloudinary URL for image ${index + 1}:`, url);
+                        return url;
+                    }
+                    return file.path;
+                }
+                
+                // Fallback: Check for secure_url in nested response (some versions)
+                if (file.secure_url) {
+                    console.log(`Using secure_url for image ${index + 1}:`, file.secure_url);
+                    return file.secure_url;
+                }
+                
+                // Fallback: Check for url
+                if (file.url) {
+                    console.log(`Using url for image ${index + 1}:`, file.url);
+                    return file.url;
+                }
+                
+                // Last resort: try to construct from public_id or filename
+                const publicId = file.public_id || file.filename;
+                if (publicId) {
+                    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+                    const url = `https://res.cloudinary.com/${cloudName}/image/upload/fooddiscover/${publicId}`;
+                    console.log(`Constructed URL from public_id for image ${index + 1}:`, url);
+                    return url;
+                }
+                
+                console.error(`No valid URL found for file ${index + 1}:`, JSON.stringify(file, null, 2));
+                return null;
+            } catch (error) {
+                console.error(`Error processing file ${index + 1}:`, error);
+                return null;
+            }
+        }).filter(Boolean); // Remove any null values
+
+        // Validate that we got valid image URLs
+        if (images.length === 0) {
+            console.error('No valid image URLs extracted from uploaded files');
+            console.error('Files received:', req.files);
+            return res.status(500).json({ 
+                success: false, 
+                message: 'Failed to upload images to Cloudinary. Please check your Cloudinary configuration and try again.' 
+            });
+        }
+        
+        // Validate all URLs are HTTPS (required for production)
+        const invalidUrls = images.filter(url => !url.startsWith('https://'));
+        if (invalidUrls.length > 0) {
+            console.warn('Some image URLs are not HTTPS:', invalidUrls);
+        }
+        
+        console.log(`Successfully uploaded ${images.length} image(s) to Cloudinary:`, images);
 
         const dietary = {
             vegetarian: req.body.vegetarian === 'true' || req.body.vegetarian === true,
@@ -218,11 +318,50 @@ router.post('/', auth, (req, res, next) => {
     }
 });
 
+// @route   GET /api/foods
+// @desc    List foods (latest first)
+// @access  Public
+router.get('/', async (req, res) => {
+    try {
+        const foods = await Food.find().sort({ createdAt: -1 }).limit(50).lean();
+        res.json({ success: true, foods });
+    } catch (error) {
+        console.error('List foods error:', error);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
 // @route   GET /api/foods/test
 // @desc    Test endpoint to verify server is working
 // @access  Public
 router.get('/test', (req, res) => {
     res.json({ success: true, message: 'Foods route is working', timestamp: new Date().toISOString() });
+});
+
+// @route   GET /api/foods/:id
+// @desc    Get a single food item by ID
+// @access  Public
+router.get('/:id', async (req, res) => {
+    try {
+        // Skip if it's the test route
+        if (req.params.id === 'test') {
+            return res.json({ success: true, message: 'Foods route is working', timestamp: new Date().toISOString() });
+        }
+        
+        const food = await Food.findById(req.params.id).lean();
+        
+        if (!food) {
+            return res.status(404).json({ success: false, message: 'Food item not found' });
+        }
+        
+        res.json({ success: true, food });
+    } catch (error) {
+        console.error('Get food error:', error);
+        if (error.name === 'CastError') {
+            return res.status(400).json({ success: false, message: 'Invalid food ID' });
+        }
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
 });
 
 // @route   DELETE /api/foods/:id
@@ -245,19 +384,6 @@ router.delete('/:id', auth, async (req, res) => {
         res.json({ success: true, message: 'Food item deleted successfully' });
     } catch (error) {
         console.error('Delete food error:', error);
-        res.status(500).json({ success: false, message: 'Server error' });
-    }
-});
-
-// @route   GET /api/foods
-// @desc    List foods (latest first)
-// @access  Public
-router.get('/', async (req, res) => {
-    try {
-        const foods = await Food.find().sort({ createdAt: -1 }).limit(50).lean();
-        res.json({ success: true, foods });
-    } catch (error) {
-        console.error('List foods error:', error);
         res.status(500).json({ success: false, message: 'Server error' });
     }
 });
