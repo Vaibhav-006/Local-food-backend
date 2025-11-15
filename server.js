@@ -7,7 +7,19 @@ require('dotenv').config({ path: './config.env' });
 const app = express();
 
 // Middleware
-app.use(cors());
+// CORS configuration - allow all origins for now
+app.use(cors({
+    origin: '*',
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+// Request logging middleware
+app.use((req, res, next) => {
+    console.log(`${new Date().toISOString()} - ${req.method} ${req.originalUrl}`);
+    next();
+});
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../')));
 // app.use('/uploads', express.static(path.join(__dirname, './uploads')));
@@ -67,13 +79,28 @@ app.use('/api/users', userRoutes);
 app.use('/api/foods', foodRoutes);
 app.use('/api/ai', aiRoutes);
 
+// Log registered routes
+console.log('✅ Routes registered:');
+console.log('   - /api/auth');
+console.log('   - /api/users');
+console.log('   - /api/foods');
+console.log('   - /api/ai');
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
     res.json({ 
         status: 'OK', 
         message: 'FoodDiscover Backend is running',
         timestamp: new Date().toISOString(),
-        database: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected'
+        database: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected',
+        routes: {
+            auth: '/api/auth',
+            users: '/api/users',
+            foods: '/api/foods',
+            ai: '/api/ai',
+            aiRecommendations: '/api/ai/recommendations',
+            aiTest: '/api/ai/test'
+        }
     });
 });
 
