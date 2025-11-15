@@ -10,6 +10,8 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../')));
+// app.use('/uploads', express.static(path.join(__dirname, './uploads')));
+
 // Keep uploads directory for backward compatibility with old images
 const uploadsPath = path.join(__dirname, './uploads');
 if (require('fs').existsSync(uploadsPath)) {
@@ -18,6 +20,7 @@ if (require('fs').existsSync(uploadsPath)) {
 } else {
     console.warn('⚠️  Uploads directory not found - old local images will not load');
 }
+
 
 // MongoDB Atlas Connection
 const connectDB = async () => {
@@ -121,29 +124,34 @@ app.post('/api/simple-login', async (req, res) => {
 });
 
 // Serve frontend files
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, '../index.html'));
-});
+// app.get('/', (req, res) => {
+//     res.sendFile(path.join(__dirname, '../index.html'));
+// });
 
-app.get('/login', (req, res) => {
-    res.sendFile(path.join(__dirname, '../login.html'));
-});
+// app.get('/login', (req, res) => {
+//     res.sendFile(path.join(__dirname, '../login.html'));
+// });
 
-app.get('/register', (req, res) => {
-    res.sendFile(path.join(__dirname, '../register.html'));
-});
+// app.get('/register', (req, res) => {
+//     res.sendFile(path.join(__dirname, '../register.html'));
+// });
 
-app.get('/dashboard', (req, res) => {
-    res.sendFile(path.join(__dirname, '../dashboard.html'));
-});
+// app.get('/dashboard', (req, res) => {
+//     res.sendFile(path.join(__dirname, '../dashboard.html'));
+// });
 
-app.get('/search', (req, res) => {
-    res.sendFile(path.join(__dirname, '../search.html'));
+// app.get('/search', (req, res) => {
+//     res.sendFile(path.join(__dirname, '../search.html'));
+// });
+
+app.get("/", (req, res) => {
+  res.send("API is working!");
 });
 
 app.get('/ai-recommendations', (req, res) => {
     res.sendFile(path.join(__dirname, '../ai-recommendations.html'));
 });
+
 
 // Error handling middleware
 app.use((err, req, res, next) => {
