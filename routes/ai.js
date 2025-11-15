@@ -3,14 +3,34 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const Food = require('../models/Food');
 const router = express.Router();
 
-// Initialize Gemini AI
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+// Initialize Gemini AI (with error handling)
+let genAI;
+try {
+    if (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'your_gemini_api_key_here') {
+        genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+        console.log('✅ Gemini AI initialized successfully');
+    } else {
+        console.warn('⚠️  GEMINI_API_KEY not configured');
+    }
+} catch (error) {
+    console.error('❌ Error initializing Gemini AI:', error);
+}
+
+// Test endpoint to verify route is working
+router.get('/test', (req, res) => {
+    res.json({ 
+        success: true, 
+        message: 'AI recommendations route is working!',
+        geminiConfigured: !!genAI
+    });
+});
 
 // @route   POST /api/ai/recommendations
 // @desc    Get AI-powered food recommendations using Gemini 2.5 Flash
 // @access  Public
 router.post('/recommendations', async (req, res) => {
     try {
+        console.log('📥 Received AI recommendation request');
         const { prompt } = req.body;
 
         // Validate prompt
@@ -22,10 +42,11 @@ router.post('/recommendations', async (req, res) => {
         }
 
         // Validate API key
-        if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === 'your_gemini_api_key_here') {
+        if (!genAI || !process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === 'your_gemini_api_key_here') {
+            console.error('❌ Gemini API key not configured');
             return res.status(500).json({ 
                 success: false, 
-                message: 'Gemini API key not configured. Please add GEMINI_API_KEY to your config.env file.' 
+                message: 'Gemini API key not configured. Please add GEMINI_API_KEY to your environment variables.' 
             });
         }
 
@@ -44,7 +65,7 @@ router.post('/recommendations', async (req, res) => {
         let filteredFoods = foods;
 
         // Extract location/city from prompt
-        const cityKeywords = ['mumbai', 'delhi', 'bangalore', 'chennai', 'kolkata', 'hyderabad', 'pune', 'new york', 'los angeles', 'chicago', 'london', 'paris', 'tokyo', 'bombay', 'calcutta'];
+        const cityKeywords = ['mumbai', 'delhi', 'bangalore', 'chennai', 'kolkata', 'hyderabad', 'pune', 'new york', 'los angeles', 'chicago', 'london', 'paris', 'tokyo', 'bombay', 'calcutta', 'rajpura', 'patiala', 'chandigarh', 'amritsar', 'ludhiana', 'jalandhar'];
         const mentionedCity = cityKeywords.find(city => promptLower.includes(city));
         if (mentionedCity) {
             filteredFoods = filteredFoods.filter(food => {
@@ -91,23 +112,52 @@ router.post('/recommendations', async (req, res) => {
             );
         }
 
-        // Extract budget from prompt
-        if (promptLower.includes('under') && (promptLower.includes('500') || promptLower.includes('₹500'))) {
-            filteredFoods = filteredFoods.filter(food => 
-                !food.price || food.price < 500 || food.priceRange === '₹'
-            );
-        } else if (promptLower.includes('500') && promptLower.includes('1000')) {
-            filteredFoods = filteredFoods.filter(food => 
-                (food.price >= 500 && food.price <= 1000) || food.priceRange === '₹₹'
-            );
-        } else if (promptLower.includes('1000') && promptLower.includes('2000')) {
-            filteredFoods = filteredFoods.filter(food => 
-                (food.price >= 1000 && food.price <= 2000) || food.priceRange === '₹₹₹'
-            );
-        } else if (promptLower.includes('over') && (promptLower.includes('2000') || promptLower.includes('₹2000'))) {
-            filteredFoods = filteredFoods.filter(food => 
-                !food.price || food.price > 2000 || food.priceRange === '₹₹₹₹'
-            );
+        // Extract budget from prompt - improved to handle dynamic amounts
+        let budgetMax = null;
+        let budgetMin = null;
+        
+        // Match patterns like "under 100", "under 100rs", "under ₹100", "below 200", etc.
+        const underMatch = promptLower.match(/(?:under|below|less than|upto|up to)\s*(?:₹|rs|rupees?)?\s*(\d+)/);
+        if (underMatch) {
+            budgetMax = parseInt(underMatch[1]);
+        }
+        
+        // Match patterns like "over 500", "above 1000", "more than 2000", etc.
+        const overMatch = promptLower.match(/(?:over|above|more than)\s*(?:₹|rs|rupees?)?\s*(\d+)/);
+        if (overMatch) {
+            budgetMin = parseInt(overMatch[1]);
+        }
+        
+        // Match range patterns like "500-1000", "500 to 1000", "between 500 and 1000"
+        const rangeMatch = promptLower.match(/(\d+)\s*(?:-|to|and)\s*(\d+)/);
+        if (rangeMatch && !underMatch && !overMatch) {
+            budgetMin = parseInt(rangeMatch[1]);
+            budgetMax = parseInt(rangeMatch[2]);
+        }
+        
+        // Apply budget filter
+        if (budgetMax !== null || budgetMin !== null) {
+            filteredFoods = filteredFoods.filter(food => {
+                if (!food.price) {
+                    // If no price, check priceRange
+                    if (budgetMax !== null && budgetMax < 500) {
+                        return food.priceRange === '₹';
+                    } else if (budgetMax !== null && budgetMax < 1000) {
+                        return food.priceRange === '₹' || food.priceRange === '₹₹';
+                    } else if (budgetMax !== null && budgetMax < 2000) {
+                        return food.priceRange === '₹' || food.priceRange === '₹₹' || food.priceRange === '₹₹₹';
+                    }
+                    return true; // Include items without price if we can't determine
+                }
+                
+                if (budgetMax !== null && food.price > budgetMax) {
+                    return false;
+                }
+                if (budgetMin !== null && food.price < budgetMin) {
+                    return false;
+                }
+                return true;
+            });
         }
 
         // Store original count to check if filtering happened
@@ -121,10 +171,8 @@ router.post('/recommendations', async (req, res) => {
                            promptLower.includes('gluten-free') || 
                            promptLower.includes('gluten free') ||
                            promptLower.includes('halal') ||
-                           (promptLower.includes('under') && (promptLower.includes('500') || promptLower.includes('₹500'))) ||
-                           (promptLower.includes('500') && promptLower.includes('1000')) ||
-                           (promptLower.includes('1000') && promptLower.includes('2000')) ||
-                           (promptLower.includes('over') && (promptLower.includes('2000') || promptLower.includes('₹2000')));
+                           budgetMax !== null ||
+                           budgetMin !== null;
         
         // If filtering was applied but no items match, return error
         if (filteredFoods.length === 0 && wasFiltered) {
@@ -334,23 +382,12 @@ Respond ONLY with valid JSON array, no additional text or explanation.`;
                 }
             }
             
-            // Check budget
-            if (promptLower.includes('under') && (promptLower.includes('500') || promptLower.includes('₹500'))) {
-                if (food.price && food.price >= 500 && food.priceRange !== '₹') {
-                    return false;
-                }
-            } else if (promptLower.includes('500') && promptLower.includes('1000')) {
-                if (food.price && (food.price < 500 || food.price > 1000) && food.priceRange !== '₹₹') {
-                    return false;
-                }
-            } else if (promptLower.includes('1000') && promptLower.includes('2000')) {
-                if (food.price && (food.price < 1000 || food.price > 2000) && food.priceRange !== '₹₹₹') {
-                    return false;
-                }
-            } else if (promptLower.includes('over') && (promptLower.includes('2000') || promptLower.includes('₹2000'))) {
-                if (food.price && food.price <= 2000 && food.priceRange !== '₹₹₹₹') {
-                    return false;
-                }
+            // Check budget (using extracted budget values)
+            if (budgetMax !== null && food.price && food.price > budgetMax) {
+                return false;
+            }
+            if (budgetMin !== null && food.price && food.price < budgetMin) {
+                return false;
             }
             
             return true;
@@ -414,7 +451,8 @@ Respond ONLY with valid JSON array, no additional text or explanation.`;
         });
 
     } catch (error) {
-        console.error('AI recommendation error:', error);
+        console.error('❌ AI recommendation error:', error);
+        console.error('Error stack:', error.stack);
         
         // Fallback: Return top-rated foods if AI fails
         try {
@@ -455,10 +493,11 @@ Respond ONLY with valid JSON array, no additional text or explanation.`;
                 note: 'AI service temporarily unavailable, showing top-rated results.'
             });
         } catch (fallbackError) {
+            console.error('❌ Fallback error:', fallbackError);
             return res.status(500).json({ 
                 success: false, 
                 message: 'Error generating recommendations. Please try again later.',
-                error: error.message 
+                error: process.env.NODE_ENV === 'development' ? error.message : undefined
             });
         }
     }
