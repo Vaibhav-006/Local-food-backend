@@ -176,54 +176,85 @@ router.post('/', auth, (req, res, next) => {
         normalizedTags = normalizedTags.filter(Boolean).slice(0, 10);
 
         // Extract Cloudinary URLs from uploaded files
-        // multer-storage-cloudinary returns the Cloudinary response in file.path (secure_url)
+        // multer-storage-cloudinary returns the Cloudinary response
         const images = req.files.map((file, index) => {
             try {
-                // multer-storage-cloudinary stores the secure_url in file.path
-                // This is the HTTPS URL that works in production
-                if (file.path && (file.path.startsWith('http://') || file.path.startsWith('https://'))) {
-                    console.log(`Image ${index + 1} uploaded to Cloudinary:`, file.path);
-                    return file.path;
-                }
+                console.log(`Processing file ${index + 1}:`, {
+                    path: file.path,
+                    url: file.url,
+                    secure_url: file.secure_url,
+                    public_id: file.public_id,
+                    filename: file.filename,
+                    keys: Object.keys(file)
+                });
                 
-                // If path exists but doesn't start with http, it might be a public_id
-                // Construct the full Cloudinary URL
-                if (file.path) {
-                    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
-                    // Check if it's already a public_id (no http/https)
-                    if (!file.path.startsWith('http')) {
-                        const url = `https://res.cloudinary.com/${cloudName}/image/upload/fooddiscover/${file.path}`;
-                        console.log(`Constructed Cloudinary URL for image ${index + 1}:`, url);
-                        return url;
+                // Check if file.path is a full URL (most common case)
+                if (file.path && typeof file.path === 'string') {
+                    if (file.path.startsWith('http://') || file.path.startsWith('https://')) {
+                        console.log(`✅ Image ${index + 1} - Using file.path (full URL):`, file.path);
+                        return file.path;
                     }
-                    return file.path;
                 }
                 
-                // Fallback: Check for secure_url in nested response (some versions)
-                if (file.secure_url) {
-                    console.log(`Using secure_url for image ${index + 1}:`, file.secure_url);
+                // Check for secure_url property (HTTPS)
+                if (file.secure_url && typeof file.secure_url === 'string') {
+                    console.log(`✅ Image ${index + 1} - Using secure_url:`, file.secure_url);
                     return file.secure_url;
                 }
                 
-                // Fallback: Check for url
-                if (file.url) {
-                    console.log(`Using url for image ${index + 1}:`, file.url);
-                    return file.url;
+                // Check for url property (HTTP)
+                if (file.url && typeof file.url === 'string') {
+                    // Convert HTTP to HTTPS if needed
+                    const secureUrl = file.url.replace('http://', 'https://');
+                    console.log(`✅ Image ${index + 1} - Using url (converted to HTTPS):`, secureUrl);
+                    return secureUrl;
                 }
                 
-                // Last resort: try to construct from public_id or filename
-                const publicId = file.public_id || file.filename;
-                if (publicId) {
+                // Check if path is a public_id and construct URL
+                if (file.path && typeof file.path === 'string' && !file.path.startsWith('http')) {
                     const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+                    // Remove folder prefix if it's already in the path
+                    let publicId = file.path;
+                    if (publicId.startsWith('fooddiscover/')) {
+                        publicId = publicId.replace('fooddiscover/', '');
+                    }
                     const url = `https://res.cloudinary.com/${cloudName}/image/upload/fooddiscover/${publicId}`;
-                    console.log(`Constructed URL from public_id for image ${index + 1}:`, url);
+                    console.log(`✅ Image ${index + 1} - Constructed URL from path:`, url);
                     return url;
                 }
                 
-                console.error(`No valid URL found for file ${index + 1}:`, JSON.stringify(file, null, 2));
+                // Try to get public_id and construct URL
+                const publicId = file.public_id || file.filename;
+                if (publicId) {
+                    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+                    // Remove folder prefix if present
+                    let cleanPublicId = publicId;
+                    if (cleanPublicId.startsWith('fooddiscover/')) {
+                        cleanPublicId = cleanPublicId.replace('fooddiscover/', '');
+                    }
+                    const url = `https://res.cloudinary.com/${cloudName}/image/upload/fooddiscover/${cleanPublicId}`;
+                    console.log(`✅ Image ${index + 1} - Constructed URL from public_id:`, url);
+                    return url;
+                }
+                
+                // Last resort: check if there's a nested response object
+                if (file.response && typeof file.response === 'object') {
+                    if (file.response.secure_url) {
+                        console.log(`✅ Image ${index + 1} - Using nested secure_url:`, file.response.secure_url);
+                        return file.response.secure_url;
+                    }
+                    if (file.response.url) {
+                        const secureUrl = file.response.url.replace('http://', 'https://');
+                        console.log(`✅ Image ${index + 1} - Using nested url:`, secureUrl);
+                        return secureUrl;
+                    }
+                }
+                
+                console.error(`❌ No valid URL found for file ${index + 1}`);
+                console.error('File object:', JSON.stringify(file, null, 2));
                 return null;
             } catch (error) {
-                console.error(`Error processing file ${index + 1}:`, error);
+                console.error(`❌ Error processing file ${index + 1}:`, error);
                 return null;
             }
         }).filter(Boolean); // Remove any null values
